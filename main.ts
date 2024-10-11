@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as xml2js from "xml2js";
+import { calculateHexValues } from "./utils/hexadecimal";
 
 class CustomError extends Error {
   constructor(message: string) {
@@ -29,6 +30,7 @@ interface FlattenedEntry {
   // ShowAsSigned: string;
   VariableType: string;
   Address: string;
+  SumAddress: string;
   Offsets: string;
 }
 
@@ -55,7 +57,7 @@ function removeArrow(str: string): string {
   return str.replace(/->/g, "");
 }
 
-function hasKey<T>(obj: T, key: keyof T): boolean {
+function hasKey<T extends object>(obj: T, key: string): boolean {
   return key in obj;
 }
 
@@ -100,6 +102,7 @@ function flattenEntries(
       Description: rootParent,
       VariableType: entry.VariableType ?? "N/A",
       Address: entry.Address ?? "N/A",
+      SumAddress: calculateHexValues(entry?.Address?.[0]),
       Offsets: offsets,
     });
 
@@ -120,19 +123,18 @@ function flattenEntries(
         }
         const cleanedDescription = removeDoubleQuotes(entry.Description[0]);
         const parent = removeArrow(cleanedDescription);
-        const elementOffsets = mapOffsetsToString(element.Offsets)
+        const elementOffsets = mapOffsetsToString(element.Offsets);
 
         flattened.push({
           ID: element.ID,
           Description: parent + removeDoubleQuotes(element.Description[0]),
           VariableType: element.VariableType ?? "N/A",
           Address: element.Address ?? "N/A",
+          SumAddress: calculateHexValues(element?.Address?.[0]),
           Offsets: elementOffsets,
         });
         // Recursively flatten nested entries
-        flattened.push(
-          ...flattenEntries([element], depth + 1, maxDepth)
-        );
+        flattened.push(...flattenEntries([element], depth + 1, maxDepth));
       }
     }
   }
@@ -157,11 +159,11 @@ function checkForDuplicates(entries: FlattenedEntry[]): FlattenedEntry[] {
 }
 
 function convertToCSV(data: FlattenedEntry[]): string {
-  const header = "ID,Description,VariableType,Address,Offsets\n";
+  const header = "ID,Description,VariableType,Address,SumAddress,Offsets\n";
   const rows = data
     .map(
       (entry) =>
-        `${entry.ID},${entry.Description},${entry.VariableType},${entry.Address},"${entry.Offsets}"`
+        `${entry.ID},${entry.Description},${entry.VariableType},${entry.Address},${entry.SumAddress},"${entry.Offsets}"`
     )
     .join("\n");
   return header + rows;
