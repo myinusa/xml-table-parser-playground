@@ -20,7 +20,7 @@ interface CheatEntry {
 }
 
 interface Offset {
-  Offset: string;
+  Offset: string[];
 }
 
 interface FlattenedEntry {
@@ -29,7 +29,7 @@ interface FlattenedEntry {
   // ShowAsSigned: string;
   VariableType: string;
   Address: string;
-  Offsets: string; // Array of offsets as a string
+  Offsets: string;
 }
 
 const xmlFilePath = "data/person-player.xml";
@@ -59,30 +59,52 @@ function hasKey<T>(obj: T, key: keyof T): boolean {
   return key in obj;
 }
 
+/**
+ * Converts an array of Offset objects to a comma-separated string.
+ * Appends "0x" at the start of each offset if it isn't already present.
+ *
+ * @param {Offset[]} offsets - The array of Offset objects.
+ * @returns {string} - A comma-separated string of offsets.
+ */
+const mapOffsetsToString = (offsets?: Offset[]): string => {
+  if (!offsets) {
+    return "";
+  }
+
+  return offsets
+    .map((item) =>
+      item.Offset.map((offset) =>
+        offset.startsWith("0x") ? offset : "0x" + offset
+      ).join(", ")
+    )
+    .join(", ");
+};
+
+// Usage in the flattenEntries function
+
 function flattenEntries(
   entries: CheatEntry[],
-  parentID?: string
+  depth: number = 0,
+  maxDepth: number = 5
 ): FlattenedEntry[] {
   const flattened: FlattenedEntry[] = [];
 
   for (const entry of entries) {
-    const offsets = entry.Offsets
-      ? entry.Offsets.map((offset) => offset.Offset).join(", ")
-      : "";
+    const offsets = mapOffsetsToString(entry.Offsets);
+    const rootDescription = removeDoubleQuotes(entry.Description[0]);
+    const rootParent = removeArrow(rootDescription);
 
     // Create a flattened entry for the current entry
     flattened.push({
       ID: entry.ID,
-      Description: entry.Description,
-      VariableType: entry.VariableType,
-      Address: entry.Address,
+      Description: rootParent,
+      VariableType: entry.VariableType ?? "N/A",
+      Address: entry.Address ?? "N/A",
       Offsets: offsets,
     });
 
-    // If there are nested CheatEntries, flatten them as well
-    if (entry.CheatEntries) {
-      //   const nestedEntries = flattenEntries(entry.CheatEntries, entry.ID);
-      //   flattened.push(...nestedEntries);
+    // If there are nested CheatEntries and we haven't reached the max depth, flatten them as well
+    if (entry.CheatEntries && depth < maxDepth) {
       const NestedCE = entry.CheatEntries[0].CheatEntry;
       if (!NestedCE) {
         throw new CustomError(
@@ -96,23 +118,44 @@ function flattenEntries(
         ) {
           continue;
         }
-        // const parent = entry.Description[0].slice(0, -3) ?? "";
         const cleanedDescription = removeDoubleQuotes(entry.Description[0]);
         const parent = removeArrow(cleanedDescription);
-        // console.log(cleanedDescription);
+        const elementOffsets = mapOffsetsToString(element.Offsets)
+
         flattened.push({
           ID: element.ID,
           Description: parent + removeDoubleQuotes(element.Description[0]),
-          VariableType: element.VariableType,
-          Address: element.Address,
-          Offsets: "",
+          VariableType: element.VariableType ?? "N/A",
+          Address: element.Address ?? "N/A",
+          Offsets: elementOffsets,
         });
+        // Recursively flatten nested entries
+        flattened.push(
+          ...flattenEntries([element], depth + 1, maxDepth)
+        );
       }
     }
   }
 
   return flattened;
 }
+
+function checkForDuplicates(entries: FlattenedEntry[]): FlattenedEntry[] {
+  const seen = new Set<string>();
+  const uniqueEntries: FlattenedEntry[] = [];
+
+  for (const entry of entries) {
+    if (!seen.has(entry.ID)) {
+      seen.add(entry.ID);
+      uniqueEntries.push(entry);
+    } else {
+      // console.warn(`Duplicate entry found and removed: ${entry.ID}`);
+    }
+  }
+
+  return uniqueEntries;
+}
+
 function convertToCSV(data: FlattenedEntry[]): string {
   const header = "ID,Description,VariableType,Address,Offsets\n";
   const rows = data
@@ -140,7 +183,13 @@ async function main() {
     // Flatten entries
     const cheatEntries = result.CheatTable.CheatEntries[0].CheatEntry;
     console.log(`Found ${cheatEntries.length} cheat entries.`);
-    const flattenedEntries = flattenEntries(cheatEntries);
+    let flattenedEntries = flattenEntries(cheatEntries);
+
+    // Check for duplicates
+    flattenedEntries = checkForDuplicates(flattenedEntries);
+    console.log(
+      `After removing duplicates, ${flattenedEntries.length} entries remain.`
+    );
 
     // Convert to CSV
     const csvOutput = convertToCSV(flattenedEntries);
